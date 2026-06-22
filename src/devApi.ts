@@ -62,14 +62,25 @@ export function installDevApi() {
       convertMaml: async (xml: string) => ({ ok: true, message: "转换完成。", data: `<Lockscreen version="1" frameRate="30" screenWidth="1080">\n${xml}\n</Lockscreen>` }),
       openPath: async () => undefined
     },
+    app: {
+      getInfo: async () => ({
+        appName: "Xiaomi Theme Packer",
+        version: "0.1.0",
+        electron: "33.3.1",
+        node: "22.0.0",
+        chrome: "130.0.0.0"
+      })
+    },
     updates: {
       check: async () => ({
         currentVersion: "0.1.0",
         latestVersion: "0.1.1",
         available: true,
         message: "New version 0.1.1 is available.",
+        releaseName: "Xiaomi Theme Packer 0.1.1",
         releaseUrl: "https://example.com/xiaomi-theme-packer/latest",
-        downloadUrl: "https://example.com/xiaomi-theme-packer/Xiaomi-Theme-Packer-0.1.1.exe"
+        downloadUrl: "https://example.com/xiaomi-theme-packer/Xiaomi-Theme-Packer-0.1.1.exe",
+        notes: "- Improved update checks\n- Fixed packaging edge cases"
       }),
       openDownload: async () => undefined,
       downloadAndInstall: async () => ({ ok: true, message: "Update downloaded. Installer started." })

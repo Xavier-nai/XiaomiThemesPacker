@@ -5,26 +5,31 @@ import fs from "node:fs";
 import os from "node:os";
 import { spawn } from "node:child_process";
 import { createThemeEngineAPI } from "./theme-engine";
-import type { DeviceStatus, LogEntry, LogLevel, OperationResult, PackRequest, ProgressPayload, ThemePreference, UnpackRequest, UpdateInfo, UpdateProgress } from "./types";
+import { createGitHubUpdateService } from "./update-service";
+import type { DeviceStatus, LogEntry, LogLevel, OperationResult, PackRequest, ProgressPayload, ThemePreference, UnpackRequest, UpdateProgress } from "./types";
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const DEFAULT_WIDTH = 1440;
 const DEFAULT_HEIGHT = 900;
 const MIN_WIDTH = 800;
 const MIN_HEIGHT = 500;
-const UPDATE_CHECK_URL =
-  process.env.XIAOMI_THEME_PACKER_UPDATE_URL ||
-  "https://example.com/xiaomi-theme-packer/latest.json";
+const UPDATE_REPO_OWNER = process.env.XIAOMI_THEME_PACKER_UPDATE_OWNER || "Xavier-nai";
+const UPDATE_REPO_NAME = process.env.XIAOMI_THEME_PACKER_UPDATE_REPO || "XiaomiThemesPacker";
 const APP_ICON_PATH = isDev
   ? path.join(process.cwd(), "build", "icon.png")
-  : path.join(process.resourcesPath, "build", "icon.png");
+  : path.join(process.resourcesPath, "build", "icon.ico");
 let mainWindow: BrowserWindow | null = null;
 let currentThemeMode: ThemePreference["mode"] = "system";
 let normalWindowBounds: { x: number; y: number; width: number; height: number } | null = null;
-let manuallyMaximized = false;
+let fullscreenRequested = false;
+let restoringFromFullscreen = false;
 let devLogPath = "";
 let windowLimitTimer: NodeJS.Timeout | null = null;
 let windowBoundsTimer: NodeJS.Timeout | null = null;
+const updateService = createGitHubUpdateService({
+  owner: UPDATE_REPO_OWNER,
+  repo: UPDATE_REPO_NAME
+});
 
 if (isDev) {
   const runtimeRoot = path.join(process.cwd(), ".runtime");
@@ -97,23 +102,6 @@ function applyTheme(mode: ThemePreference["mode"]) {
 
 function normalizeVersion(version: string) {
   return version.trim().replace(/^v/i, "").split(/[+-]/)[0];
-}
-
-function compareVersions(left: string, right: string) {
-  const leftParts = normalizeVersion(left).split(".").map((part) => Number.parseInt(part, 10) || 0);
-  const rightParts = normalizeVersion(right).split(".").map((part) => Number.parseInt(part, 10) || 0);
-  const length = Math.max(leftParts.length, rightParts.length);
-  for (let index = 0; index < length; index += 1) {
-    const leftValue = leftParts[index] || 0;
-    const rightValue = rightParts[index] || 0;
-    if (leftValue > rightValue) return 1;
-    if (leftValue < rightValue) return -1;
-  }
-  return 0;
-}
-
-function readCurrentVersion() {
-  return app.getVersion();
 }
 
 function isHttpUrl(value?: string): value is string {
@@ -193,57 +181,6 @@ async function downloadAndInstallUpdate(url: string, version?: string): Promise<
   }
 }
 
-async function checkForUpdates(): Promise<UpdateInfo> {
-  const currentVersion = readCurrentVersion();
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000);
-
-  try {
-    const response = await fetch(UPDATE_CHECK_URL, {
-      cache: "no-store",
-      signal: controller.signal,
-      headers: { accept: "application/json" }
-    });
-    if (!response.ok) {
-      return {
-        currentVersion,
-        available: false,
-        message: `Update check failed: HTTP ${response.status}.`
-      };
-    }
-
-    const data = (await response.json()) as Partial<UpdateInfo> & { version?: string };
-    const latestVersion = String(data.latestVersion || data.version || "").trim();
-    if (!latestVersion) {
-      return {
-        currentVersion,
-        available: false,
-        message: "Update manifest is missing version."
-      };
-    }
-
-    const available = compareVersions(latestVersion, currentVersion) > 0;
-    return {
-      currentVersion,
-      latestVersion,
-      available,
-      message: available ? `New version ${latestVersion} is available.` : "Already on the latest version.",
-      releaseUrl: isHttpUrl(data.releaseUrl) ? data.releaseUrl : undefined,
-      downloadUrl: isHttpUrl(data.downloadUrl) ? data.downloadUrl : undefined,
-      notes: typeof data.notes === "string" ? data.notes : undefined,
-      publishedAt: typeof data.publishedAt === "string" ? data.publishedAt : undefined
-    };
-  } catch (error) {
-    return {
-      currentVersion,
-      available: false,
-      message: error instanceof Error ? `Update check failed: ${error.message}` : "Update check failed."
-    };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 function emitLog(level: LogLevel, message: string) {
   const entry: LogEntry = {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -282,9 +219,24 @@ function getWindowBounds(state: { x?: number; y?: number; width?: number; height
 
 function applyWindowSizeLimits(window: BrowserWindow) {
   const bounds = window.getBounds();
-  const { workArea } = screen.getDisplayMatching(bounds);
+  const display = screen.getDisplayMatching(bounds);
+  const maxBounds = window.isFullScreen() || fullscreenRequested ? display.bounds : display.workArea;
   window.setMinimumSize(MIN_WIDTH, MIN_HEIGHT);
-  window.setMaximumSize(workArea.width, workArea.height);
+  window.setMaximumSize(maxBounds.width, maxBounds.height);
+}
+
+function applyFullscreenSizeLimits(window: BrowserWindow) {
+  const display = screen.getDisplayMatching(window.getBounds());
+  window.setMinimumSize(MIN_WIDTH, MIN_HEIGHT);
+  window.setMaximumSize(display.bounds.width, display.bounds.height);
+}
+
+function restoreNormalWindowBounds(window: BrowserWindow) {
+  const bounds = normalWindowBounds;
+  if (!bounds) return;
+
+  normalWindowBounds = null;
+  window.setBounds(bounds, false);
 }
 
 function scheduleWindowSizeLimits() {
@@ -304,7 +256,7 @@ function emitWindowBounds() {
     width: bounds.width,
     height: bounds.height,
     maximized: mainWindow.isMaximized(),
-    fullscreen: mainWindow.isFullScreen()
+    fullscreen: mainWindow.isFullScreen() || fullscreenRequested
   });
 }
 
@@ -369,8 +321,22 @@ function createWindow() {
   });
   mainWindow.on("maximize", emitWindowBounds);
   mainWindow.on("unmaximize", emitWindowBounds);
-  mainWindow.on("enter-full-screen", emitWindowBounds);
-  mainWindow.on("leave-full-screen", emitWindowBounds);
+  mainWindow.on("enter-full-screen", () => {
+    fullscreenRequested = true;
+    applyFullscreenSizeLimits(mainWindow!);
+    emitWindowBounds();
+  });
+  mainWindow.on("leave-full-screen", () => {
+    fullscreenRequested = false;
+    restoringFromFullscreen = true;
+    setTimeout(() => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      applyWindowSizeLimits(mainWindow);
+      restoreNormalWindowBounds(mainWindow);
+      restoringFromFullscreen = false;
+      scheduleWindowBounds();
+    }, 80);
+  });
   screen.on("display-metrics-changed", scheduleWindowSizeLimits);
 
   mainWindow.once("ready-to-show", () => {
@@ -437,27 +403,32 @@ const themeEngine = createThemeEngineAPI(
 ipcMain.handle("window:minimize", () => mainWindow?.minimize());
 ipcMain.handle("window:maximize-toggle", () => {
   if (!mainWindow) return;
-  if (mainWindow.isMaximized() || manuallyMaximized) {
-    if (mainWindow.isMaximized()) {
-      mainWindow.unmaximize();
-    } else if (normalWindowBounds) {
-      mainWindow.setBounds(normalWindowBounds, false);
-    }
-    manuallyMaximized = false;
+  if (mainWindow.isFullScreen() || fullscreenRequested || restoringFromFullscreen) {
+    fullscreenRequested = false;
+    mainWindow.setFullScreen(false);
     scheduleWindowSizeLimits();
     scheduleWindowBounds();
     return;
   }
 
   normalWindowBounds = mainWindow.getBounds();
-  mainWindow.maximize();
-  manuallyMaximized = true;
-  scheduleWindowSizeLimits();
+  fullscreenRequested = true;
+  applyFullscreenSizeLimits(mainWindow);
+  mainWindow.setFullScreen(true);
+  emitWindowBounds();
   scheduleWindowBounds();
 });
 ipcMain.handle("window:close", () => mainWindow?.close());
 
-ipcMain.handle("updates:check", () => checkForUpdates());
+ipcMain.handle("app:get-info", () => ({
+  appName: "Xiaomi Theme Packer",
+  version: app.getVersion(),
+  electron: process.versions.electron,
+  node: process.versions.node,
+  chrome: process.versions.chrome
+}));
+
+ipcMain.handle("updates:check", () => updateService.check(app.getVersion()));
 ipcMain.handle("updates:open-download", async (_event, url?: string) => {
   if (!isHttpUrl(url)) return false;
   await shell.openExternal(url);
@@ -648,6 +619,7 @@ app.on("window-all-closed", () => {
   themeEngine.stopDeviceStatusWatcher();
   if (process.platform !== "darwin") app.quit();
 });
+
 
 
 

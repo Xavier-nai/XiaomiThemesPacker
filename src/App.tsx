@@ -1,8 +1,10 @@
-import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { VariableSizeList, type ListChildComponentProps } from "react-window";
-import { CheckIcon, CleanIcon, CodeIcon, CopyIcon, DocIcon, DownloadIcon, FolderIcon, GearIcon, RestartIcon, SearchIcon, TrashIcon } from "./icons";
-import { useResizeObserver, useSmoothCorners } from "./hooks";
-import type { DeviceStatus, LogEntry, LogLevel, OperationResult, PageId, ThemeMode, UpdateInfo } from "./types";
+import { lazy, Suspense, type CSSProperties, useCallback, useEffect, useState } from "react";
+import { CleanIcon, CodeIcon, CopyIcon, DocIcon, FolderIcon, GearIcon, InfoIcon, RestartIcon } from "./icons";
+import { useSmoothCorners } from "./hooks";
+import type { LogsPageLabels } from "./pages/LogsPage";
+import type { AppInfo, DeviceStatus, LogEntry, LogLevel, OperationResult, PageId, ThemeMode, UpdateInfo, WindowBoundsPayload } from "./types";
+
+const LogsPage = lazy(() => import("./pages/LogsPage"));
 
 const locale = typeof navigator !== "undefined" ? (navigator.languages?.[0] || navigator.language || "en") : "en";
 const isChineseLocale = /^zh/i.test(locale);
@@ -16,6 +18,7 @@ const ui = isChineseLocale
       sidebarPack: "\u6253\u5305",
       sidebarLogs: "\u65e5\u5fd7",
       sidebarMore: "\u66f4\u591a",
+      sidebarAbout: "\u5173\u4e8e",
       devicePrefix: "\u8bbe\u5907",
       deviceConnected: "\u5df2\u8fde\u63a5",
       deviceDisconnected: "\u672a\u8fde\u63a5",
@@ -65,7 +68,18 @@ const ui = isChineseLocale
       updateDownloading: "\u4e0b\u8f7d\u66f4\u65b0\u4e2d",
       updateInstalling: "\u542f\u52a8\u5b89\u88c5\u5668\u4e2d...",
       updateDownloadFailed: "\u4e0b\u8f7d\u5931\u8d25",
-      updateCheck: "\u68c0\u67e5"
+      updateCheck: "\u68c0\u67e5",
+      aboutTitle: "\u5173\u4e8e",
+      aboutAppName: "\u5e94\u7528\u540d\u79f0",
+      aboutCurrentVersion: "\u5f53\u524d\u7248\u672c",
+      aboutElectronVersion: "Electron \u7248\u672c",
+      aboutNodeVersion: "Node \u7248\u672c",
+      aboutChromeVersion: "Chrome \u7248\u672c",
+      aboutUpdateStatus: "\u66f4\u65b0\u72b6\u6001",
+      aboutNotChecked: "\u672a\u68c0\u67e5",
+      aboutCheckFailed: "\u68c0\u67e5\u5931\u8d25",
+      aboutReleaseNotes: "\u66f4\u65b0\u8bf4\u660e",
+      aboutReleasePage: "\u67e5\u770b Release"
     }
   : {
       lastUpdatedPrefix: "Last updated: ",
@@ -75,6 +89,7 @@ const ui = isChineseLocale
       sidebarPack: "Pack",
       sidebarLogs: "Logs",
       sidebarMore: "More",
+      sidebarAbout: "About",
       devicePrefix: "Device",
       deviceConnected: "Connected",
       deviceDisconnected: "Disconnected",
@@ -124,7 +139,18 @@ const ui = isChineseLocale
       updateDownloading: "Downloading update",
       updateInstalling: "Starting installer...",
       updateDownloadFailed: "Download failed",
-      updateCheck: "Check"
+      updateCheck: "Check",
+      aboutTitle: "About",
+      aboutAppName: "Application",
+      aboutCurrentVersion: "Current version",
+      aboutElectronVersion: "Electron version",
+      aboutNodeVersion: "Node version",
+      aboutChromeVersion: "Chrome version",
+      aboutUpdateStatus: "Update status",
+      aboutNotChecked: "Not checked",
+      aboutCheckFailed: "Check failed",
+      aboutReleaseNotes: "Release notes",
+      aboutReleasePage: "View Release"
     };
 function createLog(level: LogLevel, message: string): LogEntry {
   const now = new Date();
@@ -204,7 +230,8 @@ function useWindowMotionState() {
   const getInitialBounds = () => ({
     width: typeof window === "undefined" ? 800 : window.innerWidth,
     height: typeof window === "undefined" ? 500 : window.innerHeight,
-    edgeToEdge: typeof window === "undefined" ? false : isViewportEdgeToEdge()
+    edgeToEdge: typeof window === "undefined" ? false : isViewportEdgeToEdge(),
+    fullscreen: typeof window === "undefined" ? false : Boolean(document.fullscreenElement)
   });
   const [state, setState] = useState(() => {
     const initial = getInitialBounds();
@@ -226,7 +253,8 @@ function useWindowMotionState() {
       width: initial.width,
       height: initial.height,
       radius: current.radius,
-      edgeToEdge: initial.edgeToEdge
+      edgeToEdge: initial.edgeToEdge,
+      fullscreen: initial.fullscreen
     };
     let resizeTimer = 0;
     let frame = 0;
@@ -238,6 +266,7 @@ function useWindowMotionState() {
         height: current.height,
         radius: current.radius,
         edgeToEdge: target.edgeToEdge,
+        fullscreen: target.fullscreen,
         resizing
       });
     };
@@ -272,10 +301,12 @@ function useWindowMotionState() {
       frame = window.requestAnimationFrame(animate);
     };
 
-    const updateTarget = (bounds: { width: number; height: number; maximized?: boolean; fullscreen?: boolean }) => {
-      target.width = bounds.width;
-      target.height = bounds.height;
+    const updateTarget = (bounds: WindowBoundsPayload) => {
+      const fullscreen = Boolean(bounds.fullscreen);
+      target.width = fullscreen ? window.innerWidth : bounds.width;
+      target.height = fullscreen ? window.innerHeight : bounds.height;
       target.edgeToEdge = Boolean(bounds.maximized || bounds.fullscreen);
+      target.fullscreen = fullscreen;
       target.radius = getDynamicWindowRadius(bounds.height, target.edgeToEdge);
       if (resizeTimer) window.clearTimeout(resizeTimer);
       resizeTimer = window.setTimeout(() => {
@@ -334,6 +365,13 @@ export function App() {
   const [deviceStatus, setDeviceStatus] = useState<DeviceStatus>({ connected: false });
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [appInfo, setAppInfo] = useState<AppInfo>({
+    appName: "Xiaomi Theme Packer",
+    version: "",
+    electron: "",
+    node: "",
+    chrome: ""
+  });
   const windowMotion = useWindowMotionState();
   const liquidWindowStyle = {
     "--liquid-width": `${windowMotion.width}px`,
@@ -365,8 +403,11 @@ export function App() {
       setThemeMode(value.mode);
       applyThemeDataset(value.mode);
     });
+    const getAppInfo = window.xiaomiThemePacker.app?.getInfo;
+    if (typeof getAppInfo === "function") {
+      getAppInfo().then(setAppInfo);
+    }
     window.xiaomiThemePacker.device.getStatus().then((status) => setDeviceStatus(status as DeviceStatus));
-    checkUpdates();
     const offLog = window.xiaomiThemePacker.events.onLog((entry) => setLogs((items) => [...items, entry]));
     const offProgress = window.xiaomiThemePacker.events.onProgress((payload) => {
       if (payload.operation === "pack" || payload.operation === "deploy") setPackProgress(payload.percent);
@@ -390,7 +431,7 @@ export function App() {
       offDeviceStatus();
       offUpdateProgress();
     };
-  }, [checkUpdates]);
+  }, []);
 
 
   useEffect(() => {
@@ -406,9 +447,21 @@ export function App() {
   const pushLocalLog = useCallback((level: LogLevel, message: string) => {
     setLogs((items) => [...items, createLog(level, message)]);
   }, []);
+  const logLabels: LogsPageLabels = {
+    logsPageTitle: ui.logsPageTitle,
+    monitoring: ui.monitoring,
+    exportLogs: ui.exportLogs,
+    clearLogs: ui.clearLogs,
+    autoScroll: ui.autoScroll,
+    timestamp: ui.timestamp,
+    filterLogs: ui.filterLogs,
+    lines: ui.lines,
+    memory: ui.memory,
+    connected: ui.connected
+  };
 
   return (
-    <div className={`app-window page-${page} ${windowMotion.edgeToEdge ? "window-edge-to-edge" : "window-floating"} ${windowMotion.resizing ? "window-resizing" : ""}`} style={liquidWindowStyle} data-window-state={windowMotion.edgeToEdge ? "edge" : "floating"} data-window-resizing={windowMotion.resizing ? "true" : "false"}>
+    <div className={`app-window page-${page} ${windowMotion.edgeToEdge ? "window-edge-to-edge" : "window-floating"} ${windowMotion.fullscreen ? "window-fullscreen" : ""} ${windowMotion.resizing ? "window-resizing" : ""}`} style={liquidWindowStyle} data-window-state={windowMotion.edgeToEdge ? "edge" : "floating"} data-window-fullscreen={windowMotion.fullscreen ? "true" : "false"} data-window-resizing={windowMotion.resizing ? "true" : "false"}>
       <Sidebar page={page} onNavigate={setPage} deviceStatus={deviceStatus} updateInfo={updateInfo} onCheckUpdate={checkUpdates} onUpdateInfoChange={setUpdateInfo} />
       <main className="main-region">
         {page === "pack" && (
@@ -428,8 +481,13 @@ export function App() {
             onLocalLog={pushLocalLog}
           />
         )}
-        {page === "logs" && <LogsPage logs={logs} setLogs={setLogs} />}
+        {page === "logs" && (
+          <Suspense fallback={null}>
+            <LogsPage logs={logs} labels={logLabels} setLogs={setLogs} />
+          </Suspense>
+        )}
         {page === "more" && <MorePage themeMode={themeMode} setThemeMode={setThemeMode} onLocalLog={pushLocalLog} />}
+        {page === "about" && <AboutPage appInfo={appInfo} updateInfo={updateInfo} onCheckUpdate={checkUpdates} />}
       </main>
     </div>
   );
@@ -449,7 +507,8 @@ function Sidebar({ page, onNavigate, deviceStatus, updateInfo, onCheckUpdate, on
   const items = [
     { id: "pack" as const, label: ui.sidebarPack, icon: FolderIcon },
     { id: "logs" as const, label: ui.sidebarLogs, icon: DocIcon },
-    { id: "more" as const, label: ui.sidebarMore, icon: GearIcon }
+    { id: "more" as const, label: ui.sidebarMore, icon: GearIcon },
+    { id: "about" as const, label: ui.sidebarAbout, icon: InfoIcon }
   ];
   const deviceLabel = `${ui.devicePrefix}: ${deviceStatus.connected ? deviceStatus.model || ui.deviceConnected : ui.deviceDisconnected}`;
 
@@ -481,9 +540,13 @@ function UpdateCard({ info, onCheckUpdate, onUpdateInfoChange }: { info: UpdateI
   const targetUrl = info.downloadUrl || info.releaseUrl;
   const installUpdate = async () => {
     if (!targetUrl) return;
+    if (!info.downloadUrl) {
+      await window.xiaomiThemePacker.updates.openDownload(targetUrl);
+      return;
+    }
     onUpdateInfoChange((current) => current ? { ...current, downloading: true, downloadProgress: 0, message: ui.updateDownloading } : current);
     const latestVersion = info.latestVersion;
-    const result = (await window.xiaomiThemePacker.updates.downloadAndInstall(targetUrl, latestVersion)) as OperationResult;
+    const result = (await window.xiaomiThemePacker.updates.downloadAndInstall(info.downloadUrl, latestVersion)) as OperationResult;
     if (!result.ok) {
       onUpdateInfoChange((current) => current ? { ...current, downloading: false, message: result.message || ui.updateDownloadFailed } : current);
       return;
@@ -514,6 +577,84 @@ function UpdateCard({ info, onCheckUpdate, onUpdateInfoChange }: { info: UpdateI
         </button>
       ) : null}
     </div>
+  );
+}
+
+function AboutPage({ appInfo, updateInfo, onCheckUpdate }: { appInfo: AppInfo; updateInfo: UpdateInfo | null; onCheckUpdate: () => void }) {
+  const checking = Boolean(updateInfo?.checking);
+  const checkFailed = Boolean(updateInfo && !updateInfo.checking && /failed/i.test(updateInfo.message));
+  const statusLabel = checking
+    ? ui.updateChecking
+    : updateInfo?.available
+      ? ui.updateAvailable
+      : checkFailed
+        ? ui.aboutCheckFailed
+        : updateInfo
+          ? ui.updateLatest
+          : ui.aboutNotChecked;
+  const statusTone = checking ? "checking" : updateInfo?.available ? "available" : checkFailed ? "failed" : updateInfo ? "latest" : "idle";
+  const versionRows = [
+    { label: ui.aboutAppName, value: appInfo.appName },
+    { label: ui.aboutCurrentVersion, value: appInfo.version || updateInfo?.currentVersion || "-" },
+    { label: ui.aboutElectronVersion, value: appInfo.electron || "-" },
+    { label: ui.aboutNodeVersion, value: appInfo.node || "-" },
+    { label: ui.aboutChromeVersion, value: appInfo.chrome || "-" }
+  ];
+
+  const openRelease = () => {
+    if (updateInfo?.releaseUrl) {
+      window.xiaomiThemePacker.updates.openDownload(updateInfo.releaseUrl);
+    }
+  };
+
+  return (
+    <section className="page about-page">
+      <div className="about-card" data-smooth-corner="16" data-figma-corner-radius="16" data-figma-corner-smoothing="0.6000000238418579" data-figma-corner-style="smooth">
+        <div className="about-header">
+          <div>
+            <h1>{ui.aboutTitle}</h1>
+          </div>
+          <span className={`about-status ${statusTone}`} data-smooth-corner="pill" data-figma-corner-radius="9999" data-figma-corner-smoothing="0" data-figma-corner-style="pill">
+            {statusLabel}
+          </span>
+        </div>
+
+        <div className="about-version-list">
+          {versionRows.map((row) => (
+            <div key={row.label} className="about-version-row">
+              <span>{row.label}</span>
+              <strong>{row.value}</strong>
+            </div>
+          ))}
+        </div>
+
+        <div className="about-update-panel" data-smooth-corner="12" data-figma-corner-radius="12" data-figma-corner-smoothing="0.6000000238418579" data-figma-corner-style="smooth">
+          <div className="about-update-head">
+            <div>
+              <span>{ui.aboutUpdateStatus}</span>
+              <strong>{updateInfo?.latestVersion ? `v${updateInfo.latestVersion}` : statusLabel}</strong>
+            </div>
+            <button className="primary-button" data-smooth-corner="8" data-figma-corner-radius="8" data-figma-corner-smoothing="0.6000000238418579" data-figma-corner-style="smooth" onClick={onCheckUpdate} disabled={checking}>
+              {ui.updateCheck}
+            </button>
+          </div>
+
+          {updateInfo?.message && <p className="about-update-message">{updateInfo.message}</p>}
+          {updateInfo?.releaseName && <p className="about-release-name">{updateInfo.releaseName}</p>}
+          {updateInfo?.notes && (
+            <div className="about-notes">
+              <span>{ui.aboutReleaseNotes}</span>
+              <pre>{updateInfo.notes}</pre>
+            </div>
+          )}
+          {updateInfo?.releaseUrl && (
+            <button className="soft-button about-release-link" data-smooth-corner="8" data-figma-corner-radius="8" data-figma-corner-smoothing="0.6000000238418579" data-figma-corner-style="smooth" onClick={openRelease}>
+              {ui.aboutReleasePage}
+            </button>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -659,114 +800,6 @@ function ProgressBar({ label, percent, tone }: { label: string; percent: number;
       </div>
     </div>
   );
-}
-
-function LogsPage({ logs, setLogs }: { logs: LogEntry[]; setLogs: React.Dispatch<React.SetStateAction<LogEntry[]>> }) {
-  const [query, setQuery] = useState("");
-  const [autoScroll, setAutoScroll] = useState(true);
-  const [timestamp, setTimestamp] = useState(true);
-  const { ref, rect } = useResizeObserver<HTMLDivElement>();
-  const listRef = useRef<VariableSizeList>(null);
-
-  const filteredLogs = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return logs;
-    return logs.filter((entry) => `${entry.time} ${entry.level} ${entry.message}`.toLowerCase().includes(needle));
-  }, [logs, query]);
-
-  useEffect(() => {
-    listRef.current?.resetAfterIndex(0, true);
-  }, [autoScroll, filteredLogs.length, rect.width, timestamp]);
-
-  useEffect(() => {
-    if (autoScroll && filteredLogs.length > 0) {
-      listRef.current?.scrollToItem(filteredLogs.length - 1, "end");
-    }
-  }, [autoScroll, filteredLogs.length, logs.length]);
-
-  const exportLogs = async () => {
-    await window.xiaomiThemePacker.operations.exportLogs(logs);
-  };
-
-  const getItemSize = (index: number) => {
-    const entry = filteredLogs[index];
-    if (!entry) return 28;
-    const listWidth = Math.max(220, rect.width || 720);
-    const fixedWidth = (timestamp ? 98 : 0) + 58 + 40;
-    const messageWidth = Math.max(96, listWidth - fixedWidth);
-    const charsPerLine = Math.max(12, Math.floor(messageWidth / 7.2));
-    const lines = Math.max(1, Math.ceil(entry.message.length / charsPerLine));
-    return Math.ceil(lines * 19.5 + 10);
-  };
-
-  const Row = ({ index, style }: ListChildComponentProps) => {
-    const entry = filteredLogs[index];
-    return (
-      <div className="log-row" style={style}>
-        <div className={`log-line level-${entry.level.toLowerCase()}`} data-smooth-corner="4" data-figma-corner-radius="4" data-figma-corner-smoothing="0.6000000238418579" data-figma-corner-style="smooth">
-          {timestamp && <span className="log-time">{entry.time}</span>}
-          <span className="log-level">[{entry.level}]</span>
-          <span className="log-message">{entry.message}</span>
-        </div>
-      </div>
-    );
-  };
-
-  return (
-    <section className="page logs-page">
-      <div className="log-shell" data-smooth-corner="18" data-figma-corner-radius="18" data-figma-corner-smoothing="0.6000000238418579" data-figma-corner-style="smooth">
-        <header className="log-header drag-bar">
-          <div className="log-title-group">
-            <h1>{ui.logsPageTitle}</h1>
-            <div className="monitor-pill" data-smooth-corner="pill" data-figma-corner-radius="9999" data-figma-corner-smoothing="0" data-figma-corner-style="pill"><span data-smooth-corner="circle" />{ui.monitoring}</div>
-          </div>
-          <div className="log-buttons">
-            <button className="soft-button" data-smooth-corner="8" data-figma-corner-radius="8" data-figma-corner-smoothing="0.6000000238418579" data-figma-corner-style="smooth" onClick={exportLogs}><DownloadIcon />{ui.exportLogs}</button>
-            <button className="soft-button" data-smooth-corner="8" data-figma-corner-radius="8" data-figma-corner-smoothing="0.6000000238418579" data-figma-corner-style="smooth" onClick={() => setLogs([])}><TrashIcon />{ui.clearLogs}</button>
-          </div>
-        </header>
-        <div className="log-toolbar">
-          <div className="check-row">
-            <button type="button" className="check-option" aria-pressed={autoScroll} onClick={() => setAutoScroll((value) => !value)}>
-              <span className="check-button" data-smooth-corner="4" data-figma-corner-radius="4" data-figma-corner-smoothing="0.6000000238418579" data-figma-corner-style="smooth">{autoScroll && <CheckIcon />}</span>
-              <span>{ui.autoScroll}</span>
-            </button>
-            <button type="button" className="check-option" aria-pressed={timestamp} onClick={() => setTimestamp((value) => !value)}>
-              <span className="check-button" data-smooth-corner="4" data-figma-corner-radius="4" data-figma-corner-smoothing="0.6000000238418579" data-figma-corner-style="smooth">{timestamp && <CheckIcon />}</span>
-              <span>{ui.timestamp}</span>
-            </button>
-          </div>
-          <div className="search-box" data-smooth-corner="8" data-figma-corner-radius="8" data-figma-corner-smoothing="0.6000000238418579" data-figma-corner-style="smooth">
-            <SearchIcon />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={ui.filterLogs} />
-          </div>
-        </div>
-        <div ref={ref} className="log-content">
-          <VariableSizeList
-            ref={listRef}
-            className="log-virtual-list"
-            height={Math.max(120, rect.height)}
-            width="100%"
-            itemCount={filteredLogs.length}
-            itemSize={getItemSize}
-            overscanCount={8}
-          >
-            {Row}
-          </VariableSizeList>
-        </div>
-        <footer className="log-footer">
-          <div><span>{ui.lines}: {logs.length}</span><span>{ui.memory}: {getMemoryLabel()}</span></div>
-          <div className="connected-dot"><span data-smooth-corner="circle" />{ui.connected}</div>
-        </footer>
-      </div>
-    </section>
-  );
-}
-
-function getMemoryLabel() {
-  const memory = (performance as Performance & { memory?: { usedJSHeapSize?: number } }).memory;
-  if (!memory?.usedJSHeapSize) return "142MB";
-  return `${Math.round(memory.usedJSHeapSize / 1024 / 1024)}MB`;
 }
 
 function MorePage({ themeMode, setThemeMode, onLocalLog }: { themeMode: ThemeMode; setThemeMode: (mode: ThemeMode) => void; onLocalLog: (level: LogLevel, message: string) => void }) {

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { DeviceStatus, LogEntry, ProgressPayload, ThemePreference, UpdateInfo, UpdateProgress, WindowBoundsPayload } from "./types";
+import type { AppInfo, DeviceStatus, LogEntry, ProgressPayload, ThemePreference, UpdateInfo, UpdateProgress, WindowBoundsPayload } from "./types";
 
 const api = {
   window: {
@@ -34,6 +34,9 @@ const api = {
     copyPackageMaml: () => ipcRenderer.invoke("operation:copy-package-maml"),
     convertMaml: (xml: string) => ipcRenderer.invoke("operation:convert-maml", xml),
     openPath: (targetPath: string) => ipcRenderer.invoke("app:open-path", targetPath)
+  },
+  app: {
+    getInfo: () => ipcRenderer.invoke("app:get-info") as Promise<AppInfo>
   },
   updates: {
     check: () => ipcRenderer.invoke("updates:check") as Promise<UpdateInfo>,

@@ -27,6 +27,14 @@ export interface OperationResult {
   data?: string;
 }
 
+export interface AppInfo {
+  appName: string;
+  version: string;
+  electron: string;
+  node: string;
+  chrome: string;
+}
+
 export interface UpdateInfo {
   currentVersion: string;
   latestVersion?: string;
@@ -35,6 +43,7 @@ export interface UpdateInfo {
   downloading?: boolean;
   downloadProgress?: number;
   message: string;
+  releaseName?: string;
   releaseUrl?: string;
   downloadUrl?: string;
   notes?: string;

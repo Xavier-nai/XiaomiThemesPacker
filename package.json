@@ -19,23 +19,23 @@
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "^4.3.4",
     "electron-window-state": "^5.0.3",
-    "fflate": "^0.8.2",
-    "figma-squircle": "^1.1.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-window": "^1.8.11"
+    "fflate": "^0.8.2"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@types/react-window": "^1.8.8",
+    "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
     "cross-env": "^7.0.3",
     "electron": "^33.3.1",
     "electron-builder": "^25.1.8",
+    "figma-squircle": "^1.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-window": "^1.8.11",
     "typescript": "^5.7.2",
     "vite": "^6.0.7",
     "wait-on": "^8.0.1"
@@ -44,6 +44,11 @@
     "appId": "com.xiaomi.theme.packer",
     "productName": "Xiaomi Theme Packer",
     "afterPack": "scripts/afterPack.cjs",
+    "compression": "maximum",
+    "electronLanguages": [
+      "en-US",
+      "zh-CN"
+    ],
     "directories": {
       "buildResources": "build",
       "output": "release"
@@ -53,13 +58,18 @@
       "dist/**/*",
       "dist-electron/**/*",
       "third_party/**/*",
-      "package.json"
+      "package.json",
+      "!**/*.map",
+      "!**/*.md",
+      "!**/*.ts",
+      "!**/*.tsx",
+      "!**/*.d.ts",
+      "!**/src/**",
+      "!**/test/**",
+      "!**/tests/**",
+      "!**/__tests__/**"
     ],
     "extraResources": [
-      {
-        "from": "build/icon.png",
-        "to": "build/icon.png"
-      },
       {
         "from": "build/icon.ico",
         "to": "build/icon.ico"

@@ -1,4 +1,4 @@
-export type PageId = "pack" | "logs" | "more";
+export type PageId = "pack" | "logs" | "more" | "about";
 export type LogLevel = "INFO" | "WARN" | "ERROR" | "SUCCESS" | "DEBUG";
 export type ThemeMode = "system" | "light" | "dark";
 
@@ -21,6 +21,14 @@ export interface OperationResult {
   data?: string;
 }
 
+export interface AppInfo {
+  appName: string;
+  version: string;
+  electron: string;
+  node: string;
+  chrome: string;
+}
+
 export interface UpdateInfo {
   currentVersion: string;
   latestVersion?: string;
@@ -29,6 +37,7 @@ export interface UpdateInfo {
   downloading?: boolean;
   downloadProgress?: number;
   message: string;
+  releaseName?: string;
   releaseUrl?: string;
   downloadUrl?: string;
   notes?: string;
@@ -40,6 +49,13 @@ export interface UpdateProgress {
   transferred: number;
   total?: number;
   message: string;
+}
+
+export interface WindowBoundsPayload {
+  width: number;
+  height: number;
+  maximized: boolean;
+  fullscreen: boolean;
 }
 
 export interface DeviceStatus {
