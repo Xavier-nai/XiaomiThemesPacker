@@ -7,25 +7,34 @@ export function useResizeObserver<T extends HTMLElement>() {
 
   useEffect(() => {
     if (!ref.current) return;
-    let frame = 0;
+    let idleTimer = 0;
     let nextRect = { width: 0, height: 0 };
+    let initialized = false;
+    const commitRect = () => {
+      setRect((current) => {
+        if (Math.round(current.width) === Math.round(nextRect.width) && Math.round(current.height) === Math.round(nextRect.height)) {
+          return current;
+        }
+        return nextRect;
+      });
+    };
     const observer = new ResizeObserver(([entry]) => {
       const box = entry.contentRect;
       nextRect = { width: box.width, height: box.height };
-      if (frame) return;
-      frame = window.requestAnimationFrame(() => {
-        frame = 0;
-        setRect((current) => {
-          if (Math.round(current.width) === Math.round(nextRect.width) && Math.round(current.height) === Math.round(nextRect.height)) {
-            return current;
-          }
-          return nextRect;
-        });
-      });
+      if (!initialized) {
+        initialized = true;
+        commitRect();
+        return;
+      }
+      if (idleTimer) window.clearTimeout(idleTimer);
+      idleTimer = window.setTimeout(() => {
+        idleTimer = 0;
+        commitRect();
+      }, 250);
     });
     observer.observe(ref.current);
     return () => {
-      if (frame) window.cancelAnimationFrame(frame);
+      if (idleTimer) window.clearTimeout(idleTimer);
       observer.disconnect();
     };
   }, []);
@@ -35,6 +44,11 @@ export function useResizeObserver<T extends HTMLElement>() {
 
 function formatPathNumber(value: number) {
   return Number(value.toFixed(3)).toString();
+}
+
+function svgMaskUrl(width: number, height: number, path: string) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${formatPathNumber(width)}" height="${formatPathNumber(height)}" viewBox="0 0 ${formatPathNumber(width)} ${formatPathNumber(height)}"><path fill="black" d="${path}"/></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
 }
 
 type CornerStyle = "rounded" | "smooth" | "circle" | "pill";
@@ -173,7 +187,8 @@ function getFigmaCornerConfig(element: HTMLElement): FigmaCornerConfig | null {
   const figmaRadius = parseNumber(element.dataset.figmaCornerRadius);
   const legacyCorner = element.dataset.smoothCorner;
   const legacyStyle = legacyCorner && Number.isNaN(Number(legacyCorner)) ? legacyCorner : undefined;
-  const style = (element.dataset.figmaCornerStyle || legacyStyle || "rounded") as CornerStyle;
+  const inferredStyle = legacyCorner && !Number.isNaN(Number(legacyCorner)) ? "smooth" : "rounded";
+  const style = (element.dataset.figmaCornerStyle || legacyStyle || inferredStyle) as CornerStyle;
   const radius = figmaRadius ?? parseNumber(legacyCorner);
 
   if (style === "circle" || style === "pill" || radius !== undefined) {
@@ -192,6 +207,18 @@ function getFigmaCornerConfig(element: HTMLElement): FigmaCornerConfig | null {
 }
 
 function applySmoothCorner(element: HTMLElement) {
+  if (element.tagName === "BUTTON") {
+    element.style.clipPath = "";
+    element.style.removeProperty("-webkit-clip-path");
+    element.style.removeProperty("mask-image");
+    element.style.removeProperty("mask-size");
+    element.style.removeProperty("mask-repeat");
+    element.style.removeProperty("-webkit-mask-image");
+    element.style.removeProperty("-webkit-mask-size");
+    element.style.removeProperty("-webkit-mask-repeat");
+    return;
+  }
+
   const bounds = element.getBoundingClientRect();
   if (bounds.width <= 0 || bounds.height <= 0) return;
 
@@ -208,6 +235,12 @@ function applySmoothCorner(element: HTMLElement) {
     element.style.borderRadius = cssRadius;
     element.style.clipPath = "";
     element.style.removeProperty("-webkit-clip-path");
+    element.style.removeProperty("mask-image");
+    element.style.removeProperty("mask-size");
+    element.style.removeProperty("mask-repeat");
+    element.style.removeProperty("-webkit-mask-image");
+    element.style.removeProperty("-webkit-mask-size");
+    element.style.removeProperty("-webkit-mask-repeat");
     return;
   }
 
@@ -225,8 +258,15 @@ function applySmoothCorner(element: HTMLElement) {
     preserveSmoothing: true
   });
   const clipPath = `path('${path}')`;
+  const mask = svgMaskUrl(bounds.width, bounds.height, path);
   element.style.clipPath = clipPath;
   element.style.setProperty("-webkit-clip-path", clipPath);
+  element.style.maskImage = mask;
+  element.style.maskSize = "100% 100%";
+  element.style.maskRepeat = "no-repeat";
+  element.style.setProperty("-webkit-mask-image", mask);
+  element.style.setProperty("-webkit-mask-size", "100% 100%");
+  element.style.setProperty("-webkit-mask-repeat", "no-repeat");
 }
 
 export function useSmoothCorners() {

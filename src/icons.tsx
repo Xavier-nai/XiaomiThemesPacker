@@ -106,15 +106,6 @@ export function CodeIcon(props: IconProps) {
   );
 }
 
-export function EyeIcon(props: IconProps) {
-  return (
-    <IconBase {...props}>
-      <path d="M2.8 12s3.2-5.6 9.2-5.6 9.2 5.6 9.2 5.6-3.2 5.6-9.2 5.6S2.8 12 2.8 12Z" />
-      <circle cx="12" cy="12" r="2.6" />
-    </IconBase>
-  );
-}
-
 export function CheckIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 14 14" fill="none" aria-hidden="true" {...props}>

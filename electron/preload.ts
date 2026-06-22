@@ -1,11 +1,16 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { LogEntry, PreviewDocument, PreviewMode, ProgressPayload, ThemePreference, UpdateInfo, UpdateProgress } from "./types";
+import type { DeviceStatus, LogEntry, ProgressPayload, ThemePreference, UpdateInfo, UpdateProgress, WindowBoundsPayload } from "./types";
 
 const api = {
   window: {
     minimize: () => ipcRenderer.invoke("window:minimize"),
     toggleMaximize: () => ipcRenderer.invoke("window:maximize-toggle"),
-    close: () => ipcRenderer.invoke("window:close")
+    close: () => ipcRenderer.invoke("window:close"),
+    onBounds: (callback: (bounds: WindowBoundsPayload) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, bounds: WindowBoundsPayload) => callback(bounds);
+      ipcRenderer.on("window:bounds", listener);
+      return () => ipcRenderer.off("window:bounds", listener);
+    }
   },
   settings: {
     getTheme: () => ipcRenderer.invoke("settings:get-theme") as Promise<ThemePreference>,
@@ -26,16 +31,9 @@ const api = {
     cleanupCache: () => ipcRenderer.invoke("operation:cleanup-cache"),
     restartAdb: () => ipcRenderer.invoke("operation:restart-adb"),
     copyPackage: () => ipcRenderer.invoke("operation:copy-package"),
+    copyPackageMaml: () => ipcRenderer.invoke("operation:copy-package-maml"),
     convertMaml: (xml: string) => ipcRenderer.invoke("operation:convert-maml", xml),
     openPath: (targetPath: string) => ipcRenderer.invoke("app:open-path", targetPath)
-  },
-  preview: {
-    loadFolder: () => ipcRenderer.invoke("preview:load-folder"),
-    loadMtz: () => ipcRenderer.invoke("preview:load-mtz"),
-    refresh: (mode?: PreviewMode) => ipcRenderer.invoke("preview:refresh", mode),
-    exportScreenshot: (dataUrl: string) => ipcRenderer.invoke("preview:export-screenshot", dataUrl),
-    watchStart: () => ipcRenderer.invoke("preview:watch-start"),
-    watchStop: () => ipcRenderer.invoke("preview:watch-stop")
   },
   updates: {
     check: () => ipcRenderer.invoke("updates:check") as Promise<UpdateInfo>,
@@ -53,15 +51,15 @@ const api = {
       ipcRenderer.on("operation:progress", listener);
       return () => ipcRenderer.off("operation:progress", listener);
     },
-    onPreviewChanged: (callback: (document: PreviewDocument) => void) => {
-      const listener = (_event: Electron.IpcRendererEvent, document: PreviewDocument) => callback(document);
-      ipcRenderer.on("preview:changed", listener);
-      return () => ipcRenderer.off("preview:changed", listener);
-    },
     onUpdateProgress: (callback: (payload: UpdateProgress) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, payload: UpdateProgress) => callback(payload);
       ipcRenderer.on("updates:progress", listener);
       return () => ipcRenderer.off("updates:progress", listener);
+    },
+    onDeviceStatus: (callback: (status: DeviceStatus) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, status: DeviceStatus) => callback(status);
+      ipcRenderer.on("device:status-changed", listener);
+      return () => ipcRenderer.off("device:status-changed", listener);
     }
   }
 };
